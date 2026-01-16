@@ -5,13 +5,15 @@ import SyncEverything from './core/synceverything';
 import GistService from './core/gist';
 import { workspace } from 'vscode';
 
-export const appName = vscode.env.appName.includes('Trae')
-	? 'Trae'
-	: vscode.env.appName.includes('Code')
-		? vscode.env.appName.includes('Insiders')
-			? 'Code - Insiders'
-			: 'Code'
-		: 'Cursor';
+export const appName = vscode.env.appName.includes('Antigravity')
+	? 'Antigravity'
+	: vscode.env.appName.includes('Trae')
+		? 'Trae'
+		: vscode.env.appName.includes('Code')
+			? vscode.env.appName.includes('Insiders')
+				? 'Code - Insiders'
+				: 'Code'
+			: 'Cursor';
 export const extConfig = vscode.workspace.getConfiguration('synceverything');
 
 export let logger: Logger;
