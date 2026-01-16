@@ -1,23 +1,28 @@
 import { readFile } from "fs/promises";
 import JSON5 from "json5";
 import {
-    Extension,
-    ExtensionContext,
-    ProgressLocation,
-    Uri,
-    commands,
-    env,
-    extensions,
-    window,
-    workspace,
+  Extension,
+  ExtensionContext,
+  ProgressLocation,
+  Uri,
+  commands,
+  env,
+  extensions,
+  window,
+  workspace,
 } from "vscode";
 import { IKeybinds, IProfile, ISettings } from "../models/interfaces";
-import { findConfigFile } from "../utils";
+import { findConfigFile, getActiveProfileInfo } from "../utils";
 import Logger from "./logger";
 
 export default class SyncEverything {
   context: ExtensionContext;
   logger: Logger;
+
+  // Profile tracking properties
+  public activeProfileId: string | null = null;
+  public activeProfileName: string | null = null;
+  public appName!: string; // Definitely assigned in initialize()
 
   private constructor(logger: Logger, context: ExtensionContext) {
     this.logger = logger;
@@ -28,61 +33,63 @@ export default class SyncEverything {
     logger: Logger,
     context: ExtensionContext
   ): Promise<SyncEverything | undefined> {
-    const appName: string = env.appName.includes("Code")
-      ? env.appName.includes("Insiders")
-        ? "Code - Insiders"
-        : "Code"
-      : "Cursor";
-    if (!context.globalState.get("settingsPath")) {
+    const appName: string = env.appName.includes("Trae")
+      ? "Trae"
+      : env.appName.includes("Code")
+        ? env.appName.includes("Insiders")
+          ? "Code - Insiders"
+          : "Code"
+        : "Cursor";
+
+    const instance = new SyncEverything(logger, context);
+    instance.appName = appName;
+
+    // Detect active profile
+    try {
+      const profileInfo = await getActiveProfileInfo(appName);
+      if (profileInfo) {
+        instance.activeProfileId = profileInfo.id;
+        instance.activeProfileName = profileInfo.name;
+        logger.info(
+          `Detected active profile: ${profileInfo.name} (${profileInfo.id})`
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        "Could not detect profile, using default",
+        false,
+        "SyncEverything.initialize"
+      );
+      instance.activeProfileId = "__default__profile__";
+      instance.activeProfileName = "Default";
+    }
+
+    // Validate we can find config files (but don't cache the paths)
+    try {
+      await findConfigFile(appName, "settings.json", instance.activeProfileId);
+      await findConfigFile(appName, "keybindings.json", instance.activeProfileId);
+    } catch (error) {
+      logger.error(
+        "Failed to automatically find configuration files - opening file picker",
+        "SyncEverything.initialize",
+        true
+      );
       try {
-        const settingsPath = await findConfigFile(appName, "settings.json");
-        context.globalState.update("settingsPath", settingsPath);
+        const settingsPath = await SyncEverything.setManualPath("settings");
+        const keybindingsPath = await SyncEverything.setManualPath("keybindings");
+        // Store manual paths for fallback
+        context.globalState.update("manualSettingsPath", settingsPath);
+        context.globalState.update("manualKeybindingsPath", keybindingsPath);
       } catch (error) {
         logger.error(
-          "Failed to automatically find settings.json file - opening file picker",
+          "Configuration files are required for SyncEverything to work, please reactivate extension and select correct configuration files.",
           "SyncEverything.initialize",
           true
         );
-        try {
-          const settingsPath = await SyncEverything.setManualPath("settings");
-          context.globalState.update("settingsPath", settingsPath);
-        } catch (error) {
-          logger.error(
-            "Configuration files are required for SyncEverything to work, please reactivate extension and select correct configuration files.",
-            "SyncEverything.initialize",
-            true
-          );
-          return undefined;
-        }
+        return undefined;
       }
     }
-    if (!context.globalState.get("keybindingsPath")) {
-      try {
-        const keybindingsPath:string = await findConfigFile(
-          appName,
-          "keybindings.json"
-        );
-        context.globalState.update("keybindingsPath", keybindingsPath);
-      } catch (error) {
-        logger.error(
-          "Failed to automatically find keybindings.json file - opening file picker",
-          "SyncEverything.initialize",
-          true
-        );
-        try {
-          const keybindingsPath:string = await SyncEverything.setManualPath("keybindings");
-          context.globalState.update("keybindingsPath", keybindingsPath);
-        } catch (error) {
-          logger.error(
-            "Configuration files are required for SyncEverything to work, please reactivate extension and select correct configuration files.",
-            "SyncEverything.initialize",
-            true
-          );
-          return undefined;
-        }
-      }
-    }
-    return new SyncEverything(logger, context);
+    return instance;
   }
   public static async setManualPath(
     t: "keybindings" | "settings",
@@ -103,6 +110,24 @@ export default class SyncEverything {
   }
 
   public async getActiveProfile(): Promise<Partial<IProfile>> {
+    // Re-detect active profile each time (in case user switched profiles)
+    try {
+      const profileInfo = await getActiveProfileInfo(this.appName);
+      if (profileInfo) {
+        this.activeProfileId = profileInfo.id;
+        this.activeProfileName = profileInfo.name;
+        this.logger.info(
+          `Current active profile: ${profileInfo.name} (${profileInfo.id})`
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        "Could not re-detect profile, using cached value",
+        false,
+        "SyncEverything.getActiveProfile"
+      );
+    }
+
     const settings = (await this.readConfigFile<ISettings>("settings"))!;
     const keybinds = (await this.readConfigFile<IKeybinds[]>("keybindings"))!;
     const exts: string[] = this.getExtensions()!;
@@ -111,26 +136,164 @@ export default class SyncEverything {
       settings: settings,
       extensions: exts,
       keybindings: keybinds,
+      // Profile metadata
+      sourceAppName: this.appName,
+      sourceProfileId: this.activeProfileId,
+      sourceProfileName: this.activeProfileName,
     } as Partial<IProfile>;
   }
 
   public async updateLocalProfile(profile: IProfile) {
-    const settingsPath: string = this.context.globalState.get(`settingsPath`)!;
+    // Always get the current path dynamically
+    const settingsPath: string = await findConfigFile(
+      this.appName,
+      "settings.json",
+      this.activeProfileId
+    );
     await this.writeConfigFile(settingsPath, profile.settings);
 
-    const keybindingsPath: string =
-      this.context.globalState.get(`keybindingsPath`)!;
+    const keybindingsPath: string = await findConfigFile(
+      this.appName,
+      "keybindings.json",
+      this.activeProfileId
+    );
     await this.writeConfigFile(keybindingsPath, profile.keybindings);
 
     await this.installExtensions(profile.extensions);
   }
 
+  public async createNewProfileFromSync(profile: IProfile): Promise<void> {
+    // 1. Ask user for new profile name
+    const profileName = await window.showInputBox({
+      prompt: "Enter name for the new profile",
+      placeHolder: profile.profileName || "My Profile",
+      validateInput: (value) => {
+        if (!value || value.trim().length === 0) {
+          return "Profile name cannot be empty";
+        }
+        return null;
+      },
+    });
+
+    if (!profileName) {
+      this.logger.info("Profile creation cancelled by user");
+      return;
+    }
+
+    try {
+      // 2. Generate unique profile ID
+      const profileId = this.generateProfileId();
+      const appName = env.appName.includes("Trae")
+        ? "Trae"
+        : env.appName.includes("Code")
+          ? "Code"
+          : "Cursor";
+
+      const baseFolder =
+        process.platform === "win32"
+          ? process.env.APPDATA
+          : process.platform === "darwin"
+            ? `${process.env.HOME}/Library/Application Support`
+            : `${process.env.HOME}/.config`;
+
+      const separator = process.platform === "win32" ? "\\" : "/";
+
+      // 3. Create profile directory
+      const profilePath = `${baseFolder}${separator}${appName}${separator}User${separator}profiles${separator}${profileId}`;
+      await workspace.fs.createDirectory(Uri.file(profilePath));
+
+      // 4. Write settings to new profile
+      const settingsPath = `${profilePath}${separator}settings.json`;
+      await this.writeConfigFile(settingsPath, profile.settings);
+
+      // 5. Write keybindings to new profile
+      const keybindingsPath = `${profilePath}${separator}keybindings.json`;
+      await this.writeConfigFile(keybindingsPath, profile.keybindings);
+
+      // 6. Install extensions
+      await this.installExtensions(profile.extensions);
+
+      // 7. Register profile in storage.json
+      await this.registerProfileInStorage(profileId, profileName, appName);
+
+      this.logger.info(`Created new profile: ${profileName} (${profileId})`);
+      window.showInformationMessage(
+        `Profile "${profileName}" created! Switch to it in your editor settings.`
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create new profile`,
+        "SyncEverything.createNewProfileFromSync",
+        true,
+        error
+      );
+      throw error;
+    }
+  }
+
+  private generateProfileId(): string {
+    // Generate 8-character hex ID
+    return Array.from({ length: 8 }, () =>
+      Math.floor(Math.random() * 16).toString(16)
+    ).join("");
+  }
+
+  private async registerProfileInStorage(
+    profileId: string,
+    profileName: string,
+    appName: string
+  ): Promise<void> {
+    try {
+      const { getStoragePath } = await import("../utils");
+      const storagePath = getStoragePath(appName);
+
+      const content = await readFile(storagePath, "utf-8");
+      const storage = JSON5.parse(content);
+
+      if (!storage.userDataProfiles) {
+        storage.userDataProfiles = [];
+      }
+
+      storage.userDataProfiles.push({
+        location: profileId,
+        name: profileName,
+      });
+
+      await workspace.fs.writeFile(
+        Uri.file(storagePath),
+        Buffer.from(JSON.stringify(storage, null, 2), "utf-8")
+      );
+
+      this.logger.info(
+        `Registered profile "${profileName}" in storage.json`
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not register profile in storage.json: ${error}`,
+        false,
+        "SyncEverything.registerProfileInStorage"
+      );
+    }
+  }
+
   private async readConfigFile<T>(
     t: "keybindings" | "settings"
   ): Promise<T | undefined> {
-    let path:string;
+    let path: string;
+
     try {
-      path = this.context.globalState.get(`${t}Path`)!;
+      // Check if manual path is set
+      const manualPath = this.context.globalState.get<string>(`manual${t.charAt(0).toUpperCase() + t.slice(1)}Path`);
+      if (manualPath) {
+        path = manualPath;
+      } else {
+        // Always find the path dynamically based on current profile
+        path = await findConfigFile(
+          this.appName,
+          `${t}.json`,
+          this.activeProfileId
+        );
+      }
     } catch (error) {
       this.logger.error(
         `${t} file has not been set, cannot read from empty file path`,

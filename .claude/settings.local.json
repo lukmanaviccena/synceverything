@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(if:*)",
+      "Bash(then ls \"C:\\\\Users\\\\Phantom\\\\AppData\\\\Roaming\\\\Code\\\\User\\\\profiles\")",
+      "Bash(else echo \"No profiles directory found\")",
+      "Bash(fi:*)",
+      "Bash(npm run compile:*)",
+      "Bash(npm run package:*)",
+      "Bash(npx vsce package:*)",
+      "Bash(npx @vscode/vsce package:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

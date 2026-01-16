@@ -5,11 +5,13 @@ import SyncEverything from './core/synceverything';
 import GistService from './core/gist';
 import { workspace } from 'vscode';
 
-export const appName = vscode.env.appName.includes('Code')
-	? vscode.env.appName.includes('Insiders')
-		? 'Code - Insiders'
-		: 'Code'
-	: 'Cursor';
+export const appName = vscode.env.appName.includes('Trae')
+	? 'Trae'
+	: vscode.env.appName.includes('Code')
+		? vscode.env.appName.includes('Insiders')
+			? 'Code - Insiders'
+			: 'Code'
+		: 'Cursor';
 export const extConfig = vscode.workspace.getConfiguration('synceverything');
 
 export let logger: Logger;
@@ -121,6 +123,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
 								settings: currentProfile.settings!,
 								extensions: currentProfile.extensions!,
 								keybindings: currentProfile.keybindings!,
+								// Include profile metadata
+								sourceAppName: currentProfile.sourceAppName,
+								sourceProfileId: currentProfile.sourceProfileId,
+								sourceProfileName: currentProfile.sourceProfileName,
 							};
 
 							progress.report({
@@ -176,6 +182,27 @@ export async function activate(ctx: vscode.ExtensionContext) {
 						return;
 					}
 
+					// Ask user how to apply the profile
+					const applyMethod = await vscode.window.showQuickPick(
+						[
+							{
+								label: 'Overwrite Current Profile',
+								description: 'Replace settings in the active profile',
+								value: 'overwrite',
+							},
+							{
+								label: 'Create New Profile',
+								description: 'Create a new profile with these settings',
+								value: 'create',
+							},
+						],
+						{ placeHolder: 'How would you like to apply this profile?' }
+					);
+
+					if (!applyMethod) {
+						return;
+					}
+
 					await vscode.window.withProgress(
 						{
 							location: vscode.ProgressLocation.Notification,
@@ -187,7 +214,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
 								message: 'Pulling remote profile data',
 								increment: 25,
 							});
-							const profileFile = masterGist.files[`${selectedProfile.label}.json`];
+							const profileFile =
+								masterGist.files[`${selectedProfile.label}.json`];
 							const profile = await gistService.getProfile(profileFile.raw_url);
 
 							progress.report({
@@ -195,7 +223,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
 								increment: 50,
 							});
 
-							await ExtensionController.updateLocalProfile(profile);
+							// Handle different apply methods
+							if (applyMethod.value === 'create') {
+								await ExtensionController.createNewProfileFromSync(profile);
+							} else {
+								await ExtensionController.updateLocalProfile(profile);
+							}
 
 							progress.report({
 								message: 'Complete!',
@@ -209,14 +242,21 @@ export async function activate(ctx: vscode.ExtensionContext) {
 						false,
 						'PullProfile'
 					);
-					const reload = await vscode.window.showInformationMessage(
-						`Profile "${selectedProfile.label}" applied successfully! Reload window to see all changes?`,
-						'Reload Now',
-						'Later'
-					);
 
-					if (reload === 'Reload Now') {
-						await vscode.commands.executeCommand('workbench.action.reloadWindow');
+					if (applyMethod.value === 'create') {
+						vscode.window.showInformationMessage(
+							`Profile "${selectedProfile.label}" pulled successfully!`
+						);
+					} else {
+						const reload = await vscode.window.showInformationMessage(
+							`Profile "${selectedProfile.label}" applied successfully! Reload window to see all changes?`,
+							'Reload Now',
+							'Later'
+						);
+
+						if (reload === 'Reload Now') {
+							await vscode.commands.executeCommand('workbench.action.reloadWindow');
+						}
 					}
 				} catch (error) {
 					logger.error(`Failed to pull profile`, 'PullProfile', true, error);
@@ -272,6 +312,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
 								settings: currentProfile.settings!,
 								extensions: currentProfile.extensions!,
 								keybindings: currentProfile.keybindings!,
+								// Include profile metadata
+								sourceAppName: currentProfile.sourceAppName,
+								sourceProfileId: currentProfile.sourceProfileId,
+								sourceProfileName: currentProfile.sourceProfileName,
 							};
 
 							progress.report({

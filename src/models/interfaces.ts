@@ -63,6 +63,10 @@ export interface IProfile {
 	settings: string | ISettings;
 	extensions: string[];
 	keybindings: string[] | any[];
+	// Profile metadata for tracking source
+	sourceAppName?: 'Code' | 'Code - Insiders' | 'Cursor' | 'Trae';
+	sourceProfileId?: string | null;
+	sourceProfileName?: string | null;
 }
 
 export interface ISettings {
