@@ -12,7 +12,7 @@ import {
   workspace,
 } from "vscode";
 import { IKeybinds, IProfile, ISettings } from "../models/interfaces";
-import { findConfigFile, getActiveProfileInfo } from "../utils";
+import { findConfigFile, getActiveProfileInfo, getAppName } from "../utils";
 import Logger from "./logger";
 
 export default class SyncEverything {
@@ -33,15 +33,7 @@ export default class SyncEverything {
     logger: Logger,
     context: ExtensionContext
   ): Promise<SyncEverything | undefined> {
-    const appName: string = env.appName.includes("Antigravity")
-      ? "Antigravity"
-      : env.appName.includes("Trae")
-        ? "Trae"
-        : env.appName.includes("Code")
-          ? env.appName.includes("Insiders")
-            ? "Code - Insiders"
-            : "Code"
-          : "Cursor";
+    const appName: string = getAppName();
 
     const instance = new SyncEverything(logger, context);
     instance.appName = appName;
@@ -185,13 +177,7 @@ export default class SyncEverything {
     try {
       // 2. Generate unique profile ID
       const profileId = this.generateProfileId();
-      const appName = env.appName.includes("Antigravity")
-        ? "Antigravity"
-        : env.appName.includes("Trae")
-          ? "Trae"
-          : env.appName.includes("Code")
-            ? "Code"
-            : "Cursor";
+      const appName = getAppName();
 
       const baseFolder =
         process.platform === "win32"

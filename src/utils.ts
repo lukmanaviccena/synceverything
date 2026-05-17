@@ -4,6 +4,21 @@ import JSON5 from "json5";
 import { Uri, workspace, FileSystemError } from "vscode";
 
 import { logger } from "./extension";
+import { env } from "vscode";
+
+export const getAppName = (): string => {
+  return env.appName.includes("Kiro")
+    ? "Kiro"
+    : env.appName.includes("Antigravity")
+      ? "Antigravity"
+      : env.appName.includes("Trae")
+        ? "Trae"
+        : env.appName.includes("Code")
+          ? env.appName.includes("Insiders")
+            ? "Code - Insiders"
+            : "Code"
+          : "Cursor";
+};
 
 const getConfigPaths = (
   appName: string,

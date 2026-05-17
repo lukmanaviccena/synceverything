@@ -64,7 +64,7 @@ export interface IProfile {
 	extensions: string[];
 	keybindings: string[] | any[];
 	// Profile metadata for tracking source
-	sourceAppName?: 'Code' | 'Code - Insiders' | 'Cursor' | 'Trae' | 'Antigravity';
+	sourceAppName?: 'Code' | 'Code - Insiders' | 'Cursor' | 'Trae' | 'Antigravity' | 'Kiro';
 	sourceProfileId?: string | null;
 	sourceProfileName?: string | null;
 }
